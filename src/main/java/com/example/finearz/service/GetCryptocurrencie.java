@@ -1,6 +1,7 @@
 package com.example.finearz.service;
 
 import com.example.finearz.model.Cryptocurrencie;
+import com.example.finearz.repository.CryptocurrencieRepository;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -17,11 +18,41 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Configuration
-public class GetCryptocurrencie {
-    List<Cryptocurrencie> cryptocurrencies = new ArrayList<>();
+public class GetCryptocurrencie extends Thread {
+    @Override
+    public void run() {
+        while (true) {
+            if (cryStatus){
+                try {
+                    getCryptocurrencieIRT();
+                    getCryptocurrencieUSDT();
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                } catch (JSONException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            try {
+                Thread.sleep(20000);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    CryptocurrencieRepository repository;
+    List<Cryptocurrencie> crys = new ArrayList<>();
+    Cryptocurrencie cryptocurrencie;
+    Boolean cryStatus = false;
+    int giveIt = 0;
+
+    public GetCryptocurrencie(CryptocurrencieRepository repository) {
+        this.repository = repository;
+    }
+
     @Bean
-    public void GetCryptocurrencie() throws IOException, JSONException {
-        URL url = new URL("https://api.finearz.net/api/v1/market/?");
+    public void getCryptocurrencieIRT() throws IOException, JSONException {
+        URL url = new URL("https://api.finearz.net/api/v1/market/?fiat=IRT");
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestProperty("accept", "application/json");
         InputStream responseStream = connection.getInputStream();
@@ -31,18 +62,38 @@ public class GetCryptocurrencie {
             while ((responseLine = br.readLine()) != null) {
                 response.append(responseLine);
             }
+            String reasonString = response.toString();
+            getSymbols(getCrypto(reasonString));
+            getMarketInfoIRT(reasonString);
+        }
+    }
 
+    @Bean
+    public void getCryptocurrencieUSDT() throws IOException, JSONException {
+        StringBuilder responseUSDT = new StringBuilder();
+        URL url = new URL("https://api.finearz.net/api/v1/market/?fiat=USDT");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestProperty("accept", "application/json");
+        InputStream responseStream = connection.getInputStream();
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(responseStream, "utf-8"))) {
+            String responseLine = null;
+            while ((responseLine = br.readLine()) != null) {
+                responseUSDT.append(responseLine);
+            }
 
         }
-        String reasonString = response.toString();
-        getSymbols(reasonString);
-        getMarketInfo(reasonString);
+        String reasonString = responseUSDT.toString();
+        getMarketInfoUSDT(reasonString);
 
+        if (giveIt == 0) {
+            crys = repository.saveAll(crys);
+            giveIt++;
+        }
     }
-    public static String getCrypto(String responseBody)throws JSONException{
+
+    public static String getCrypto(String responseBody) throws JSONException {
         JSONArray albums = new JSONArray(responseBody);
         String symbol = null;
-        String name = null;
         String values = null;
         for (int i = 0; i < albums.length(); i++) {
             JSONObject album = albums.getJSONObject(i);
@@ -69,27 +120,61 @@ public class GetCryptocurrencie {
         }
         return values;
     }
-    public static List<String> getSymbols(String responseBody) throws JSONException {
+
+    public void getSymbols(String responseBody) throws JSONException {
         String symbol = null;
         String name = null;
-        List<String> symbols = new ArrayList<>();
-        List<String> names = new ArrayList<>();
-        JSONArray forsymbols = new JSONArray(getCrypto(responseBody));
+        JSONArray forsymbols = new JSONArray(responseBody);
         for (int i = 0; i < forsymbols.length(); i++) {
             JSONObject forsymbol = forsymbols.getJSONObject(i);
+            Cryptocurrencie cryptocurrencie = new Cryptocurrencie();
             symbol = forsymbol.getString("symbol");
+            cryptocurrencie.setSymbol(symbol);
             name = forsymbol.getString("name");
-            symbols.add(symbol);
-            names.add(name);
+            cryptocurrencie.setName(name);
+            crys.add(cryptocurrencie);
         }
-        System.out.println("values: "+ symbols);
-        System.out.println("names :" + names);
-        return symbols;
+
     }
-    public static List<String> getMarketInfo(String responseBody) throws JSONException{
+
+    public void getMarketInfoIRT(String responseBody) throws JSONException {
         JSONArray albums = new JSONArray(responseBody);
         String value = null;
-        List<Float> prices = new ArrayList<>();
+        String values = null;
+        for (int i = 0; i < albums.length(); i++) {
+            JSONObject album = albums.getJSONObject(i);
+            value = album.getString("marketInfo");
+
+            if (i == 0) {
+                values = "[" + value + ",";
+            } else if (i == albums.length() - 1) {
+                values = values + value + "]";
+            } else {
+                values = values + value + ",";
+            }
+        }
+        JSONArray forLastPrices = new JSONArray(values);
+        for (int i = 0; i < forLastPrices.length(); i++) {
+            JSONObject forLastPrice = forLastPrices.getJSONObject(i);
+            float newPrice = Float.valueOf(forLastPrice.getString("lastPrice"));
+            if (giveIt == 0) {
+                crys.get(i).setPriceIRT(Float.valueOf(forLastPrice.getString("lastPrice")));
+                crys.get(i).setLastDayChange(Float.valueOf(forLastPrice.getString("lastDayChange")));
+            } else if (Float.valueOf(forLastPrice.getString("lastDayChange")) >= 2) {
+                cryptocurrencie = repository.findById((long) (i + 1)).get();
+                cryptocurrencie.setLastDayChange(Float.valueOf(forLastPrice.getString("lastDayChange")));
+                cryptocurrencie.setPriceIRT(Float.valueOf(forLastPrice.getString("lastPrice")));
+                repository.save(cryptocurrencie);
+                cryStatus = true;
+
+            }
+        }
+    }
+
+    public void getMarketInfoUSDT(String responseBody) throws JSONException {
+        int j = 0;
+        JSONArray albums = new JSONArray(responseBody);
+        String value = null;
         String values = null;
         for (int i = 0; i < albums.length(); i++) {
             JSONObject album = albums.getJSONObject(i);
@@ -102,17 +187,22 @@ public class GetCryptocurrencie {
                 values = values + value + ",";
             }
         }
-        System.out.println(values);
-
-        JSONArray forLastPrices = new JSONArray(values);
-        for (int i = 0; i < forLastPrices.length(); i++) {
-            JSONObject forLastPrice = forLastPrices.getJSONObject(i);
-            prices.add(Float.valueOf(forLastPrice.getString("lastPrice")));
+        JSONArray forLastPricesAndChange = new JSONArray(values);
+        for (int i = 0; i < forLastPricesAndChange.length(); i++) {
+            JSONObject forLastPrice = forLastPricesAndChange.getJSONObject(i);
+            if (giveIt == 0) {
+                if (j == 8) {
+                    j++;
+                    i--;
+                    continue;
+                }
+                crys.get(j).setPriceUSDT(Float.valueOf(forLastPrice.getString("lastPrice")));
+                j++;
+            } else if (cryStatus && i!=8) {
+                 repository.findById((long) (i+1)).get().setPriceUSDT(Float.valueOf(forLastPrice.getString("lastPrice")));
+            }
         }
-        System.out.println(prices);
-        return null;
     }
-
 }
 
 

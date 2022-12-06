@@ -4,10 +4,11 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
-@Getter
-@Setter
+
 @Entity(name = "cryptocurrencies")
 @Table
+@Getter
+@Setter
 public class Cryptocurrencie {
     @Id
     @SequenceGenerator(name = "cryptocurrencie_sequence",
@@ -54,5 +55,7 @@ public class Cryptocurrencie {
                 ", lastDayChange=" + lastDayChange +
                 '}';
     }
+
+
 }
 
